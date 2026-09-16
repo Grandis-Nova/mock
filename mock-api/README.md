@@ -12,11 +12,16 @@
 ## 실행
 
 ```bash
+docker compose up -d mysql       # 루트에서. reservation_mock database 가 만들어진다
 ./gradlew :mock-api:bootRun      # http://localhost:8081
 ```
 
-H2 파일 모드(`./data/mock-api.mv.db`)를 쓰므로 **재기동해도 등록 기록이 유지된다**(5.4 기록 보존).
-시연을 처음부터 다시 하려면 그 파일을 지우면 된다.
+저장소는 MySQL `reservation_mock` database 다. preorder 와 **같은 인스턴스의 다른 database** 이며
+cross-database 조회나 물리 FK 를 두지 않는다. 재기동해도 등록 기록이 유지된다(5.4 기록 보존).
+
+지연·실패율 설정은 테이블에 두지 않으므로 **재기동하면 기본값(500ms / 5%)으로 돌아간다.**
+요구사항이 요구하는 것은 "재기동 없이 변경"(FR-M-05)이지 "재기동 후 유지"가 아니고,
+시연은 매번 같은 초기 상태에서 시작하는 편이 낫기 때문이다.
 
 ## API
 
@@ -90,8 +95,12 @@ com.grandis.nova.mockapi/
 ./gradlew :mock-api:test
 ```
 
-테스트에서는 `src/test/resources/application.yml` 이 H2 를 인메모리로,
+테스트에서는 `src/test/resources/application.yml` 이 H2 인메모리로,
 지연·실패율을 0 으로 덮어쓴다.
+
+> **주의:** H2 는 컨텍스트 로딩 확인용이다. 멱등 등록의 동시성은 유니크 제약에 의존하므로
+> H2 에서 통과해도 MySQL 에서 통과한다는 보장이 없다. 동시성 테스트는 Testcontainers MySQL 로
+> 옮겨야 한다(미결정).
 
 구현 시 최소한 다음 4가지는 검증해야 한다.
 

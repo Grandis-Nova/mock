@@ -36,5 +36,6 @@ out/
 ### VS Code ###
 .vscode/
 
-### mock-api H2 data ###
-data/
+### 설정 파일 (접속 정보 포함) ###
+*.yml
+!*.yml.example
