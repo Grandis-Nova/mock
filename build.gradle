@@ -21,7 +21,11 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-web'
     implementation 'org.springframework.boot:spring-boot-starter-validation'
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
-    runtimeOnly 'com.h2database:h2'
+    runtimeOnly 'com.mysql:mysql-connector-j'
+
+    // H2 는 테스트에서 컨텍스트 로딩 확인용으로만 쓴다.
+    // 멱등 등록의 동시성은 잠금과 중복 키 동작에 기대므로 H2 통과가 MySQL 통과를 뜻하지 않는다.
+    testRuntimeOnly 'com.h2database:h2'
 
     compileOnly 'org.projectlombok:lombok'
     annotationProcessor 'org.projectlombok:lombok'
