@@ -1,0 +1,36 @@
+# 로컬 개발용 MySQL.
+#
+# 본 서비스(be)와 통합할 때는 그쪽 MySQL 인스턴스에 external_mock database 를 만들어 붙인다.
+# ERD 가 "같은 인스턴스의 별도 database" 로 정했고, 정합성 검사가 두 스키마를 한 번에 읽기 때문이다.
+# 여기 컨테이너는 Mock 만 따로 개발·시험할 때 쓰는 것이라 포트를 3307 로 띄워 충돌을 피한다.
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: nova-mock-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: external_mock
+      MYSQL_USER: nova
+      MYSQL_PASSWORD: nova
+      TZ: UTC
+    command:
+      # MySQL 서버 기본값은 REPEATABLE READ 다. 등록·취소가 같은 새 키로 동시에 들어올 때
+      # 중복 키(1062)를 정상 분기로 처리하는 설계가 READ COMMITTED 전제다.
+      # 애플리케이션(Hikari)에서도 한 번 더 지정한다.
+      - --transaction-isolation=READ-COMMITTED
+      - --character-set-server=utf8mb4
+      - --max-connections=500
+    ports:
+      - "3307:3306"
+    volumes:
+      # 최초 기동 때 한 번 실행된다. 스키마를 바꿨으면 볼륨을 지우고 다시 띄운다.
+      - ./docs/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - mock-mysql-data:/var/lib/mysql
+    healthcheck:
+      test: [ "CMD", "mysqladmin", "ping", "-h", "localhost" ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  mock-mysql-data:

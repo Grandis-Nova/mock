@@ -39,3 +39,4 @@ out/
 ### 설정 파일 (접속 정보 포함) ###
 *.yml
 !*.yml.example
+!src/test/resources/application.yml
