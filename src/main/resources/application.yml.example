@@ -11,7 +11,8 @@ spring:
       enabled: true
 
   datasource:
-    # compose.yaml 로 띄운 로컬 MySQL. 본 서비스와 통합할 때는 그쪽 인스턴스 주소로 바꾼다.
+    # compose.yaml 로 띄운 로컬 MySQL. 포트는 .env 의 MYSQL_PORT 와 맞춘다(기본 3307).
+    # 본 서비스와 통합할 때는 그쪽 인스턴스 주소로 바꾼다.
     url: jdbc:mysql://localhost:3307/external_mock?serverTimezone=UTC&characterEncoding=UTF-8
     username: nova
     password: CHANGE_ME
