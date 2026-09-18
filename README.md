@@ -115,104 +115,147 @@
 
 ---
 
-## 모듈
-
-| 모듈 | 포트 | 상태 |
-| --- | --- | --- |
-| `mock-api` | 8081 | 외부 예약 시스템 Mock. 패키지 골격만 |
-| `preorder-api` | 8080 | 사전예약 본 서비스. **아직 없음** |
-
-두 서비스는 **HTTP 로만** 통신하고 DB 를 공유하지 않는다. Mock 이 남의 회사 시스템을 연기하는
-역할이라, 저장소를 공유하면 정합성 검사가 "자기가 쓴 걸 자기가 읽고 일치한다"고 보고하게 된다.
-
----
-
 ## mock-api
 
-외부 예약 시스템(통신사 예약 서버) 역할을 대신하는 Mock 서버.
-요구사항 명세서 5.4 의 계약을 구현한다.
+외부 예약 시스템(통신사 예약 서버) 역할을 대신하는 Mock 서버. 포트는 **8081** 이고
+본 서비스(`be` 저장소)는 8080 이다. 요구사항 5.4 의 계약을 구현한다.
 
-> **현재 상태: 패키지 구조만 잡힌 상태다.** 아래 API 는 구현할 계약이며 아직 코드가 없다.
+> **현재 상태: 공통 기반만 올라간 상태다.** 아래 API 는 구현할 계약이며 아직 코드가 없다.
+
+업무 호출은 **HTTP 로만** 한다. 다만 **정합성 검사는 예외로 `external_mock` 스키마를 읽기 전용으로
+직접 조회한다**(팀 결정, 요구사항 2.3 · 6.1). 대조를 위한 전체 목록 API 를 만들지 않는 대신,
+검사가 실패한 실행도 보고서 파일로 남겨 "조회 실패" 를 "불일치 0건" 으로 표시하지 않는다.
+
+**Mock 은 프로세스 1개로 띄운다.** 지연·실패 설정과 결함이 메모리에 있어 2개 이상이면
+설정 변경이 한쪽에만 적용되고, 결함을 건 키의 요청이 다른 쪽으로 가면 발동하지 않는다.
+등록 기록은 DB 라 영향이 없다.
 
 ### 실행
 
 ```bash
-docker compose up -d mysql       # 루트에서. reservation_mock database 가 만들어진다
+cp src/main/resources/application.yml.example src/main/resources/application.yml
+docker compose up -d mysql       # external_mock database 가 만들어진다 (로컬 전용, 포트 3307)
 ./gradlew bootRun                # http://localhost:8081
 ```
 
-저장소는 MySQL `reservation_mock` database 다. preorder 와 **같은 인스턴스의 다른 database** 이며
+저장소는 MySQL `external_mock` database 다. 본 서비스와 **같은 인스턴스의 다른 database** 이며
 cross-database 조회나 물리 FK 를 두지 않는다. 재기동해도 등록 기록이 유지된다(5.4 기록 보존).
+`compose.yaml` 은 Mock 만 따로 개발할 때 쓰는 것이고, 통합할 때는 본 서비스 쪽 인스턴스에
+`external_mock` database 를 만들어 붙인다.
 
 지연·실패율 설정은 테이블에 두지 않으므로 **재기동하면 기본값(500ms / 5%)으로 돌아간다.**
-요구사항이 요구하는 것은 "재기동 없이 변경"(FR-M-05)이지 "재기동 후 유지"가 아니고,
+요구사항이 요구하는 것은 "재기동 없이 변경"이지 "재기동 후 유지"가 아니고,
 시연은 매번 같은 초기 상태에서 시작하는 편이 낫기 때문이다.
 
-### API
+### API — 8개
+
+| 메서드 | 경로 | 설명 |
+| --- | --- | --- |
+| POST | `/external/reservations` | 예약 등록 (멱등) |
+| GET | `/external/reservations/{externalNumber}` | 번호로 단건 조회 |
+| GET | `/external/reservations/by-key/{externalKey}` | 키로 등록 상태 조회 |
+| POST | `/external/cancellations` | 예약 취소 |
+| GET · PUT | `/external/config` | 지연·실패 설정 조회 · 변경 |
+| POST | `/external/faults` | 결함 주입 (응답 유실) |
+| POST | `/external/reset` | 기록 초기화 |
 
 #### 예약 등록 (멱등)
 
 ```bash
-curl -X POST localhost:8081/reservations \
-  -H 'Idempotency-Key: order-1' -H 'Content-Type: application/json' \
-  -d '{"memberId":1,"modelId":10,"optionId":100,"quantity":1}'
+curl -X POST localhost:8081/external/reservations \
+  -H 'Idempotency-Key: 9f1c2d3e-4a5b-6c7d-8e9f-0a1b2c3d4e5f' \
+  -H 'Content-Type: application/json' \
+  -d '{"customerId":1001,"productId":12,"sku":"SM-G999-256-BLK"}'
 ```
 
 | 상황 | 응답 |
 | --- | --- |
-| 최초 요청 | `201` + 새 `externalReservationNo` |
-| 같은 키 · 같은 내용 | `201` + **같은** `externalReservationNo` (새 등록을 만들지 않음) |
-| 같은 키 · 다른 내용 | `409 IDEMPOTENCY_KEY_CONFLICT` |
+| 최초 요청 | `201` + 새 `externalNumber` |
+| 같은 키 · 같은 내용 | `201` + **같은** `externalNumber` + `X-Idempotent-Replay: true` |
+| 같은 키 · 다른 내용 | `422 KEY_PAYLOAD_MISMATCH` |
+| 취소 표식이 있는 키 | `409 KEY_CANCELED` |
 
-동일 내용 판정은 JSON 문자열이 아니라 업무 필드(`memberId:modelId:optionId:quantity`)로 한다(5.3).
+멱등 키는 본 서비스의 `preorders.preorder_token` 이다. 동일 내용 판정은 JSON 문자열이 아니라
+**저장된 `customer_id` · `product_id` · `sku` 를 직접 비교**한다(요구사항 5.3, ERD). 지문(해시) 칸을
+두지 않아 어느 필드가 달라 거절됐는지 응답에 담을 수 있다.
 
 #### 조회
 
 ```bash
-curl localhost:8081/reservations/EXT-00000001     # 단건
-curl localhost:8081/reservations                  # 전체 (취소분 포함, status 로 구분)
+curl localhost:8081/external/reservations/R-20260916-004821          # 번호로 단건
+curl localhost:8081/external/reservations/by-key/9f1c2d3e-...        # 키로 상태
 ```
 
-전체 조회는 정합성 배치가 외부 등록을 빠짐없이 훑기 위한 것이다(FR-C-07/08).
+키 조회는 **잠금 읽기**로 한다. 커밋 안 된 등록을 못 본 채 404 를 돌려주면 워커가 재등록해
+중복 등록이 된다. 잠금 읽기여야 "404 = 등록 안 됨" 이 확정 근거가 된다.
 
-#### 취소 (멱등)
+#### 취소
 
 ```bash
-curl -X POST localhost:8081/reservations/EXT-00000001/cancel
+curl -X POST localhost:8081/external/cancellations \
+  -H 'Content-Type: application/json' \
+  -d '{"externalKey":"9f1c2d3e-...","reason":"GHOST_COMPENSATION"}'
 ```
 
-미등록 예약번호도, 이미 취소된 건도 `200` 으로 응답한다. 통신 장애로 같은 대상에
-취소를 반복해도 중복 효과가 생기지 않는다(5.4).
+미등록 키도, 이미 취소된 건도 `200` 이다. **등록이 없어도 취소 표식 행을 남긴다** — 표식이 없으면
+"취소 성공" 이라고 응답해놓고 늦게 도착한 등록이 살아나는 상태가 된다.
 
 #### 지연·실패율 변경 (시연용)
 
 ```bash
-curl localhost:8081/admin/chaos
-curl -X PUT localhost:8081/admin/chaos \
-  -H 'Content-Type: application/json' -d '{"delayMillis":3000,"failureRatePercent":50}'
+curl localhost:8081/external/config
+curl -X PUT localhost:8081/external/config -H 'Content-Type: application/json' \
+  -d '{"registerLatencyMs":2000,"failureRate":0.5,"failureMode":"HTTP_5XX"}'
 ```
 
-서버 재기동 없이 즉시 적용되며, 응답으로 **실제 적용값**을 돌려준다(FR-M-05 수락 기준).
-`/admin` 경로에는 지연·실패가 주입되지 않으므로 실패율 100% 상태에서도 되돌릴 수 있다.
+서버 재기동 없이 즉시 적용되며, 응답으로 **실제 적용값**을 돌려준다.
+설정·조회·취소 경로에는 지연·실패를 주입하지 않으므로 실패율 100% 상태에서도 되돌릴 수 있다.
 
-기본값은 `application.yml` 의 `mock.chaos` (500ms / 5%).
+기본값은 `application.yml` 의 `mock.*` (500ms / 5%).
+
+#### 결함 주입
+
+```bash
+curl -X POST localhost:8081/external/faults -H 'Content-Type: application/json' \
+  -d '{"externalKey":"9f1c2d3e-...","faultType":"RESPONSE_LOST_AFTER_COMMIT"}'
+```
+
+등록을 커밋한 뒤 응답 없이 연결을 끊는다. **지연·실패율로는 이 상황을 만들 수 없다** —
+주입한 실패는 모두 커밋 전이라 등록이 저장되지 않기 때문이다. 한 번 발동하면 자동 해제된다.
 
 ### 구조
-
-클래스 15개 안쪽이라 계층별 패키지를 두지 않고 평탄하게 간다.
 
 ```
 com.grandis.nova.mockapi/
 ├── global/
-│   ├── chaos/      ChaosSettings(현재 설정) + ChaosFilter(지연·실패 주입)
-│   └── error/      예외 → 응답 매핑
-├── registration/   Reservation 등록·조회·취소, 멱등 판정, 채번
-└── admin/          지연·실패율 조회·변경
+│   ├── chaos/      설정 스냅샷 · 지연·실패 주입 · 결함 (인터페이스 + 임시 구현)
+│   ├── config/     MockProperties (지연·실패율·타임아웃 유지 시간 기본값)
+│   └── error/      오류 코드 · 응답 형식 · 예외 핸들러
+├── registration/   등록 원장 — 등록 · 조회 · 취소 · 멱등 판정 · 채번
+└── admin/          설정 · 결함 주입 · 초기화 API
 ```
 
-지연·실패 주입을 필터에 둔 이유는 업무 코드에 `Thread.sleep` 과 랜덤 실패가 섞이지 않게
-하기 위해서다. 대신 **조회·취소에도 지연이 걸린다** — 정합성 배치의 전체 조회가 느려지는 게
-거슬리면 `ChaosFilter.shouldNotFilter` 에서 경로를 조정하면 된다.
+지연·실패 주입은 **등록 처리 안에서** 부른다. 필터에 두면 조회·취소에도 걸리는데, 과제가 취소를
+"항상 성공" 으로 가정하고 정합성 조회까지 느려지기 때문이다. 대기는 **트랜잭션 밖**에서 한다 —
+트랜잭션 안에서 기다리면 DB 커넥션이 그만큼 묶여 풀이 마른다.
+
+등록 처리 순서는 이렇다.
+
+```
+[트랜잭션 밖]  1. 지연 대기   2. 실패율 판정(커밋 전이라 저장 없음)
+[트랜잭션 안]  3. 키 행 잠금   4. 취소 표식이면 KEY_CANCELED
+               5. 이미 등록됐으면 재생 / 내용 다르면 422
+               6. 커밋 후 201   7. 결함이 걸려 있으면 응답 없이 연결 끊기
+```
+
+같은 새 키로 등록과 취소가 동시에 들어오면 한쪽이 중복 키(1062)를 받는다. **오류가 아니라
+정상 분기다** — 다시 잠금 읽기로 조회해 이어간다. 이 설계는 READ COMMITTED 전제이므로
+`application.yml` 과 `compose.yaml` 양쪽에서 격리 수준을 지정한다.
+
+### 스키마
+
+`docs/schema.sql` 이 정본이다. Hibernate 가 테이블을 만들면 CHECK 제약이 빠지므로
+`ddl-auto` 는 `validate` 로 둔다. 칸을 바꿀 때는 엔티티와 이 파일을 함께 고친다.
 
 ### 테스트
 
@@ -223,16 +266,17 @@ com.grandis.nova.mockapi/
 테스트에서는 `src/test/resources/application.yml` 이 H2 인메모리로,
 지연·실패율을 0 으로 덮어쓴다.
 
-> **주의:** H2 는 컨텍스트 로딩 확인용이다. 멱등 등록의 동시성은 유니크 제약에 의존하므로
-> H2 에서 통과해도 MySQL 에서 통과한다는 보장이 없다. 동시성 테스트는 Testcontainers MySQL 로
-> 옮겨야 한다(미결정).
+> **주의:** H2 는 컨텍스트 로딩 확인용이다. 멱등 등록의 동시성은 잠금과 중복 키 동작에 기대므로
+> H2 에서 통과해도 MySQL 에서 통과한다는 보장이 없다. 동시성 테스트는 MySQL 로 돌린다.
 
-구현 시 최소한 다음 4가지는 검증해야 한다.
+구현 시 최소한 다음 6가지는 검증해야 한다.
 
-- 같은 키·같은 내용의 재요청이 같은 예약번호를 반환하는가 (5.4 멱등 등록)
-- 같은 키·다른 내용을 409 로 거절하는가 (5.3)
-- 취소를 반복해도, 미등록 예약번호를 취소해도 성공으로 처리하는가 (5.4)
-- 실패율 100% 에서도 관리자 API 로 설정을 되돌릴 수 있는가 (FR-M-05)
+- 같은 키·같은 내용의 재요청이 같은 예약번호를 반환하는가
+- 같은 키·다른 내용을 422 로 거절하는가
+- 같은 키로 동시에 10건을 보내도 등록이 1건인가 (**100회 반복**해야 의미가 있다)
+- 취소를 반복해도, 미등록 키를 취소해도 성공으로 처리하는가
+- 취소 뒤 늦게 도착한 등록이 `KEY_CANCELED` 로 막히는가
+- 실패율 100% 에서도 설정 API 로 되돌릴 수 있는가
 
 ---
 
