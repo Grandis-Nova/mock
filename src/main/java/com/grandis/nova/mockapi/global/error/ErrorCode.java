@@ -20,7 +20,7 @@ public enum ErrorCode {
     KEY_CANCELED(HttpStatus.CONFLICT, "이미 취소된 키입니다.", true),
 
     /** 같은 키로 다른 내용이 왔다. 본 서비스 버그이므로 재시도하지 않는다. */
-    KEY_PAYLOAD_MISMATCH(HttpStatus.UNPROCESSABLE_ENTITY, "같은 키로 다른 내용이 요청되었습니다.", false),
+    KEY_PAYLOAD_MISMATCH(HttpStatus.UNPROCESSABLE_CONTENT, "같은 키로 다른 내용이 요청되었습니다.", false),
 
     /** 주입된 일시 실패. 커밋 전이라 아무것도 저장되지 않는다. */
     UPSTREAM_UNAVAILABLE(HttpStatus.INTERNAL_SERVER_ERROR, "외부 시스템을 사용할 수 없습니다.", false);
