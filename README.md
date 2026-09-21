@@ -133,10 +133,15 @@
 ### 실행
 
 ```bash
-cp src/main/resources/application.yml.example src/main/resources/application.yml
+cp .env.example .env                                                               # DB 계정 · 포트
+cp src/main/resources/application.yml.example src/main/resources/application.yml   # 접속 정보
 docker compose up -d mysql       # external_mock database 가 만들어진다 (로컬 전용, 포트 3307)
 ./gradlew bootRun                # http://localhost:8081
 ```
+
+**그대로 복사하면 그대로 뜬다.** 접속 정보가 `.env`(컨테이너가 만드는 계정)와
+`application.yml`(앱이 접속하는 계정) 두 군데에 나뉘어 있으니, 포트나 비밀번호를 바꾸려면
+**양쪽을 같이** 고친다.
 
 저장소는 MySQL `external_mock` database 다. 본 서비스와 **같은 인스턴스의 다른 database** 이며
 cross-database 조회나 물리 FK 를 두지 않는다. 재기동해도 등록 기록이 유지된다(5.4 기록 보존).
