@@ -1,5 +1,6 @@
 package com.grandis.nova.mockapi.global.error;
 
+import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -29,7 +30,8 @@ import org.springframework.web.bind.annotation.RestController;
  * 여기서만 쓰는 시험용 컨트롤러로 각 예외를 일으킨다.
  */
 @WebMvcTest
-@Import(GlobalExceptionHandlerTest.ProbeController.class)
+@Import({GlobalExceptionHandlerTest.ProbeController.class,
+        GlobalExceptionHandlerTest.PlainProbeController.class})
 class GlobalExceptionHandlerTest {
 
     @Autowired
@@ -61,9 +63,22 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
-    @DisplayName("경로 변수 길이 검증 - 100 자를 넘으면 400")
+    @DisplayName("경로 변수 길이 검증 - @Validated 가 붙은 컨트롤러")
     void constraintViolation() throws Exception {
         mvc.perform(get("/probe/" + "k".repeat(101)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errorCode").value("INVALID_REQUEST"));
+    }
+
+    /**
+     * 같은 길이 위반인데 {@code @Validated} 가 없으면 스프링이 다른 예외를 던진다.
+     * 컨트롤러마다 애너테이션을 기억해야 한다면 언젠가 한 번은 빠뜨린다. 빠뜨린 경로가 통째로
+     * 500 이 되면 워커가 그 요청을 영원히 재시도하므로, 둘 다 400 이어야 한다.
+     */
+    @Test
+    @DisplayName("경로 변수 길이 검증 - @Validated 가 없는 컨트롤러도 400")
+    void methodValidationWithoutValidated() throws Exception {
+        mvc.perform(get("/plain/" + "k".repeat(101)))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.errorCode").value("INVALID_REQUEST"));
     }
@@ -74,8 +89,9 @@ class GlobalExceptionHandlerTest {
         mvc.perform(get("/없는경로"))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.errorCode").value("NOT_FOUND"))
-                // 값이 없어도 필드를 생략하지 않는다(명세). doesNotExist() 는 null 도 통과시켜 이 계약을 못 잡는다.
-                .andExpect(jsonPath("$.externalNumber").hasJsonPath());
+                // 값이 없어도 필드를 생략하지 않는다(명세). doesNotExist() 는 필드가 아예 없어도
+                // 통과해서 이 계약을 못 잡는다. value(nullValue()) 는 "있고 null" 만 통과한다.
+                .andExpect(jsonPath("$.externalNumber").value(nullValue()));
     }
 
     @Test
@@ -106,6 +122,16 @@ class GlobalExceptionHandlerTest {
         @GetMapping("/probe/number/{n}")
         String number(@PathVariable int n) {
             return String.valueOf(n);
+        }
+    }
+
+    /** {@code @Validated} 를 일부러 붙이지 않았다. */
+    @RestController
+    static class PlainProbeController {
+
+        @GetMapping("/plain/{key}")
+        String get(@PathVariable @Size(min = 1, max = 100) String key) {
+            return key;
         }
     }
 }
