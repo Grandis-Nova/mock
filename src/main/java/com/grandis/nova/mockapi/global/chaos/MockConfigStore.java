@@ -1,6 +1,8 @@
 package com.grandis.nova.mockapi.global.chaos;
 
 import com.grandis.nova.mockapi.global.config.MockProperties;
+import java.time.Instant;
+import java.util.concurrent.atomic.AtomicReference;
 import org.springframework.stereotype.Component;
 
 /**
@@ -12,15 +14,25 @@ import org.springframework.stereotype.Component;
 @Component
 public class MockConfigStore implements ConfigProvider {
 
-    /** 지금 적용 중인 설정. 1단계에서는 바뀌지 않는다. */
-    private final ConfigSnapshot current;
+    /**
+     * 설정과 적용 시각을 한 묶음으로 둔다.
+     *
+     * <p>따로 두면 "설정은 바뀌었는데 시각은 아직 옛것" 인 틈이 생기고, 그 사이에 조회가 끼면
+     * 어긋난 값을 함께 내보낸다. 한 묶음을 통째로 교체하면 그 틈이 없다.
+     */
+    public record Applied(ConfigSnapshot snapshot, Instant appliedAt) {
+    }
+
+    private final AtomicReference<Applied> current;
 
     public MockConfigStore(MockProperties properties) {
-        this.current = new ConfigSnapshot(
-                properties.registerLatencyMs(),
-                properties.failureRate(),
-                properties.failureMode(),
-                0);
+        this.current = new AtomicReference<>(new Applied(
+                new ConfigSnapshot(
+                        properties.registerLatencyMs(),
+                        properties.failureRate(),
+                        properties.failureMode(),
+                        0),
+                Instant.now()));
     }
 
     /**
@@ -30,6 +42,28 @@ public class MockConfigStore implements ConfigProvider {
      */
     @Override
     public ConfigSnapshot snapshot() {
-        return current;
+        return current.get().snapshot();
+    }
+
+    /** 조회 API 용. 적용 시각까지 필요할 때 쓴다. */
+    public Applied applied() {
+        return current.get();
+    }
+
+    /**
+     * 설정을 바꾸고 configVersion 을 1 올린다.
+     *
+     * <p>범위 검사는 여기서 하지 않는다. 설정 테이블이 없어 DB 제약이 없으므로 API 계층이 맡는다.
+     *
+     * @return 실제로 적용된 값. 요청값을 그대로 돌려주지 않는다
+     */
+    public Applied update(int registerLatencyMs, double failureRate, FailureMode failureMode) {
+        return current.updateAndGet(old -> new Applied(
+                new ConfigSnapshot(
+                        registerLatencyMs,
+                        failureRate,
+                        failureMode,
+                        old.snapshot().configVersion() + 1),
+                Instant.now()));
     }
 }
