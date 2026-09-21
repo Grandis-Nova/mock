@@ -27,11 +27,6 @@ dependencies {
     // 멱등 등록의 동시성은 잠금과 중복 키 동작에 기대므로 H2 통과가 MySQL 통과를 뜻하지 않는다.
     testRuntimeOnly 'com.h2database:h2'
 
-    compileOnly 'org.projectlombok:lombok'
-    annotationProcessor 'org.projectlombok:lombok'
-    testCompileOnly 'org.projectlombok:lombok'
-    testAnnotationProcessor 'org.projectlombok:lombok'
-
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
     // Spring Boot 4 에서 MockMvc 자동설정이 별도 모듈로 분리되었다.
     testImplementation 'org.springframework.boot:spring-boot-webmvc-test'
