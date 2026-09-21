@@ -74,7 +74,8 @@ class GlobalExceptionHandlerTest {
         mvc.perform(get("/없는경로"))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.errorCode").value("NOT_FOUND"))
-                .andExpect(jsonPath("$.externalNumber").doesNotExist());
+                // 값이 없어도 필드를 생략하지 않는다(명세). doesNotExist() 는 null 도 통과시켜 이 계약을 못 잡는다.
+                .andExpect(jsonPath("$.externalNumber").hasJsonPath());
     }
 
     @Test
