@@ -1,8 +1,12 @@
 package com.grandis.nova.mockapi.admin;
 
 import com.grandis.nova.mockapi.admin.dto.ConfigResponse;
+import com.grandis.nova.mockapi.admin.dto.ConfigUpdateRequest;
 import com.grandis.nova.mockapi.global.chaos.MockConfigStore;
+import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -28,5 +32,20 @@ public class MockConfigController {
     @GetMapping
     public ConfigResponse get() {
         return ConfigResponse.from(store.applied());
+    }
+
+    /**
+     * 재기동 없이 값을 바꾼다. 진행 중인 등록 시도는 시작 시점 설정으로 끝나고, 변경은 이후
+     * 시도부터 적용된다.
+     *
+     * <p>응답은 요청값이 아니라 저장소가 돌려준 <b>실제 적용값</b>이다. 받은 값을 그대로
+     * 되돌려주면 적용 실패를 저장 성공으로 표시할 수 있다(요구사항 4.4).
+     */
+    @PutMapping
+    public ConfigResponse update(@Valid @RequestBody ConfigUpdateRequest request) {
+        return ConfigResponse.from(store.update(
+                request.registerLatencyMs(),
+                request.failureRate(),
+                request.failureModeOrDefault()));
     }
 }
