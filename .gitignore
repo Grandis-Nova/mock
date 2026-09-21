@@ -39,3 +39,10 @@ out/
 ### 설정 파일 (접속 정보 포함) ###
 *.yml
 !*.yml.example
+!src/test/resources/application.yml
+# *.yml 은 폴더 깊이와 무관하게 걸린다. GitHub Actions 는 이 경로의 .yml 만 읽으므로 미리 열어둔다.
+!.github/workflows/*.yml
+
+### 로컬 환경 변수 ###
+.env
+!.env.example

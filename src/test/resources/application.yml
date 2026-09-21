@@ -1,0 +1,24 @@
+# 테스트용 설정. 접속 정보가 없어 커밋한다(.gitignore 예외).
+#
+# H2 는 컨텍스트 로딩과 단순 검증용이다. 멱등 등록의 동시성은 잠금·중복 키 동작에 기대므로
+# H2 에서 통과해도 MySQL 에서 통과한다는 보장이 없다. 동시성 시험은 MySQL 로 돌린다.
+spring:
+  datasource:
+    url: jdbc:h2:mem:mockapi;MODE=MySQL;DB_CLOSE_DELAY=-1
+    username: sa
+    password:
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+    open-in-view: false
+
+# 시험에서는 지연·실패를 끈다.
+mock:
+  register-latency-ms: 0
+  failure-rate: 0.0
+  failure-mode: HTTP_5XX
+  timeout-hold-ms: 1000

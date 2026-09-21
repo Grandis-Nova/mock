@@ -1,0 +1,54 @@
+# 이 파일을 application.yml 로 복사해 쓴다. application.yml 은 커밋하지 않는다.
+spring:
+  application:
+    name: mock-api
+
+  threads:
+    virtual:
+      # 지연 2000ms 로 부하를 걸면 요청 수천 건이 Mock 안에서 동시에 대기한다.
+      # 블로킹 스레드 풀이면 큐가 밀려 설정값보다 훨씬 큰 지연이 관측되고,
+      # "우리 서버가 느린 것" 과 "Mock 이 느린 것" 을 구분할 수 없게 된다.
+      enabled: true
+
+  datasource:
+    # compose.yaml 로 띄운 로컬 MySQL. 포트는 .env 의 MYSQL_PORT 와 맞춘다(기본 3307).
+    # 본 서비스와 통합할 때는 그쪽 인스턴스 주소로 바꾼다.
+    url: jdbc:mysql://localhost:3307/external_mock?serverTimezone=UTC&characterEncoding=UTF-8
+    # 로컬 compose 기본값이다(.env 의 MYSQL_USER / MYSQL_PASSWORD).
+    # 다른 값을 쓰려면 .env 와 이 파일을 같이 고친다. 한쪽만 바꾸면 접속이 거부된다.
+    username: nova
+    password: nova
+    hikari:
+      # 빠뜨리면 오류가 나지 않는다. 부하가 걸릴 때까지 아무도 모른다.
+      transaction-isolation: TRANSACTION_READ_COMMITTED
+      maximum-pool-size: 20
+
+  jpa:
+    hibernate:
+      # 스키마는 docs/schema.sql 이 정본이다. Hibernate 가 만들면 CHECK 제약이 빠진다.
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+    open-in-view: false
+
+server:
+  port: 8081
+  tomcat:
+    # failureMode=TIMEOUT 은 응답하지 않고 연결을 붙잡는다. 부하 시험에서 연결이 쌓인다.
+    max-connections: 8192
+
+# 지연·실패 설정의 기본값. 실행 중에는 PUT /external/config 로 바꾸고,
+# 재기동하면 이 값으로 돌아간다(ERD: 설정 테이블을 두지 않는다).
+mock:
+  register-latency-ms: 500
+  failure-rate: 0.05
+  failure-mode: HTTP_5XX
+  # TIMEOUT 모드에서 응답 없이 연결을 유지하는 시간.
+  # 워커 HTTP 읽기 타임아웃 + 2초로 잡는다. 지금은 워커 타임아웃 3초 가정값이다.
+  timeout-hold-ms: 5000
+
+logging:
+  level:
+    com.grandis.nova.mockapi: DEBUG
