@@ -9,8 +9,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.grandis.nova.mockapi.global.chaos.ConfigProvider;
 import com.grandis.nova.mockapi.global.chaos.FailureMode;
 import com.grandis.nova.mockapi.global.chaos.MockConfigStore;
+import com.grandis.nova.mockapi.global.config.MockProperties;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -40,6 +42,24 @@ class MockConfigApiTest {
     @Autowired
     private ConfigProvider configProvider;
 
+    @Autowired
+    private MockProperties properties;
+
+    /**
+     * 바꾼 설정을 기본값으로 되돌린다.
+     *
+     * <p>{@code @SpringBootTest} 는 컨텍스트를 캐시해 재사용하고 저장소는 싱글턴이라, 되돌리지
+     * 않으면 바뀐 설정이 다음 시험 클래스까지 따라간다. 지연·실패 주입이 올라오면 남의 시험이
+     * 무작위로 느려지고 실패하는데, 원인을 찾기 어려운 종류다.
+     *
+     * <p>{@code configVersion} 은 누적이라 0 으로 되돌릴 수 없다. 여기 시험들은 모두 상대 비교
+     * (before + 1, before + N)라 문제되지 않는다.
+     */
+    @AfterEach
+    void restoreDefaults() {
+        store.update(properties.registerLatencyMs(), properties.failureRate(), properties.failureMode());
+    }
+
     /**
      * 스텁이 안 물러나면 A 파트는 설정을 바꿔도 계속 기본값으로 돈다.
      *
@@ -49,6 +69,18 @@ class MockConfigApiTest {
     @DisplayName("실제 구현이 올라오면 임시 스텁은 물러난다")
     void stubBacksOff() {
         assertThat(configProvider).isSameAs(store);
+    }
+
+    /**
+     * 앞 시험이 바꾼 설정이 남아 있지 않은지 본다. 복원이 빠지면 여기서 걸린다.
+     */
+    @Test
+    @DisplayName("시험은 언제나 기본값에서 시작한다")
+    void startsFromDefaults() {
+        var snapshot = store.snapshot();
+        assertThat(snapshot.registerLatencyMs()).isEqualTo(properties.registerLatencyMs());
+        assertThat(snapshot.failureRate()).isEqualTo(properties.failureRate());
+        assertThat(snapshot.failureMode()).isEqualTo(properties.failureMode());
     }
 
     /**
