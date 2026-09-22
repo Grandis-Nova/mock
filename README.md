@@ -164,6 +164,15 @@ cross-database 조회나 물리 FK 를 두지 않는다. 재기동해도 등록 
 | POST | `/external/faults` | 결함 주입 (응답 유실) |
 | POST | `/external/reset` | 기록 초기화 |
 
+**요청 본문에 계약에 없는 필드가 있으면 `400 INVALID_REQUEST` 다.** 모르는 필드를 조용히 버리면
+설정 API 에 없는 값을 넣어도 200 이 나와 적용된 줄 알게 되고, 워커가 계약과 다른 본문을 보내도
+아무도 모른다. 오류 메시지에 틀린 필드 이름과 받을 수 있는 필드, enum 이면 허용값을 담는다.
+
+```
+timeoutHoldMs 은(는) 알 수 없는 필드입니다. 받을 수 있는 필드: registerLatencyMs, failureRate, failureMode
+failureMode 은(는) HTTP_5XX, TIMEOUT 중 하나여야 합니다. 받은 값: HTTP_429
+```
+
 #### 예약 등록 (멱등)
 
 ```bash

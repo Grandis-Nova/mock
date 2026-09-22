@@ -1,7 +1,10 @@
 package com.grandis.nova.mockapi.global.error;
 
 import jakarta.validation.ConstraintViolationException;
+import java.util.Arrays;
+import java.util.Collection;
 import java.util.Objects;
+import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.MessageSourceResolvable;
@@ -17,6 +20,10 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.HandlerMethodValidationException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.exc.InvalidFormatException;
+import tools.jackson.databind.exc.MismatchedInputException;
+import tools.jackson.databind.exc.UnrecognizedPropertyException;
 
 /**
  * 공통 예외 처리.
@@ -75,10 +82,15 @@ public class GlobalExceptionHandler {
         return badRequest(e.getHeaderName() + " 헤더가 필요합니다.");
     }
 
-    /** 본문이 비었거나 JSON 이 깨진 경우. */
+    /**
+     * 본문을 객체로 바꾸지 못한 경우. 원인을 찾아 무엇이 틀렸는지 알려준다.
+     *
+     * <p>"읽을 수 없다" 로 뭉뚱그리면 사람이 손으로 치는 설정 API 에서 오타를 찾을 수 없다.
+     * 원인을 알 수 없는 경우(JSON 이 깨졌거나 본문이 비었을 때)만 그 문장으로 남긴다.
+     */
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public ResponseEntity<ErrorResponse> handleUnreadable(HttpMessageNotReadableException e) {
-        return badRequest("요청 본문을 읽을 수 없습니다.");
+        return badRequest(describeUnreadable(e));
     }
 
     /** Content-Type 누락 또는 오타. 본문을 읽을 수 없으니 재시도해도 같다. */
@@ -149,6 +161,67 @@ public class GlobalExceptionHandler {
         log.error("처리하지 못한 오류", e);
         ErrorCode code = ErrorCode.UPSTREAM_UNAVAILABLE;
         return ResponseEntity.status(code.status()).body(ErrorResponse.of(code));
+    }
+
+    /**
+     * 본문 변환 실패의 원인을 문장으로 만든다. 순서가 중요하다 — 모르는 필드와 enum 오류도
+     * 넓게 보면 형식 불일치(MismatchedInputException)라서, 구체적인 쪽을 먼저 본다.
+     */
+    private static String describeUnreadable(HttpMessageNotReadableException e) {
+        JacksonException cause = findCause(e, JacksonException.class);
+        if (cause instanceof UnrecognizedPropertyException unknown) {
+            return unknown.getPropertyName() + " 은(는) 알 수 없는 필드입니다."
+                    + knownFields(unknown.getKnownPropertyIds());
+        }
+        if (cause instanceof InvalidFormatException invalid
+                && invalid.getTargetType() != null && invalid.getTargetType().isEnum()) {
+            return fieldPath(invalid) + " 은(는) " + enumNames(invalid.getTargetType())
+                    + " 중 하나여야 합니다. 받은 값: " + invalid.getValue();
+        }
+        if (cause instanceof MismatchedInputException mismatched && !mismatched.getPath().isEmpty()) {
+            return fieldPath(mismatched) + " 값의 형식이 올바르지 않습니다.";
+        }
+        return "요청 본문을 읽을 수 없습니다.";
+    }
+
+    private static <T extends Throwable> T findCause(Throwable e, Class<T> type) {
+        for (Throwable t = e; t != null; t = t.getCause()) {
+            if (type.isInstance(t)) {
+                return type.cast(t);
+            }
+        }
+        return null;
+    }
+
+    /** 중첩 객체면 "a.b", 배열이면 "items[0]" 처럼 이어 붙인다. */
+    private static String fieldPath(JacksonException e) {
+        StringBuilder path = new StringBuilder();
+        for (JacksonException.Reference ref : e.getPath()) {
+            if (ref.getPropertyName() != null) {
+                if (!path.isEmpty()) {
+                    path.append('.');
+                }
+                path.append(ref.getPropertyName());
+            } else if (ref.getIndex() >= 0) {
+                path.append('[').append(ref.getIndex()).append(']');
+            }
+        }
+        return path.isEmpty() ? "요청 값" : path.toString();
+    }
+
+    private static String enumNames(Class<?> enumType) {
+        return Arrays.stream(enumType.getEnumConstants())
+                .map(constant -> ((Enum<?>) constant).name())
+                .collect(Collectors.joining(", "));
+    }
+
+    private static String knownFields(Collection<Object> known) {
+        if (known == null || known.isEmpty()) {
+            return "";
+        }
+        return " 받을 수 있는 필드: " + known.stream()
+                .map(String::valueOf)
+                .collect(Collectors.joining(", "));
     }
 
     /** 어느 값이 왜 틀렸는지. 이름이나 메시지가 비어 있을 수 있어 둘 다 받아둔다. */
