@@ -27,6 +27,12 @@ dependencies {
     // 멱등 등록의 동시성은 잠금과 중복 키 동작에 기대므로 H2 통과가 MySQL 통과를 뜻하지 않는다.
     testRuntimeOnly 'com.h2database:h2'
 
+    // 동시성 시험은 진짜 MySQL 로 돌린다. 시험이 컨테이너를 직접 띄우므로 Docker 만 켜져 있으면 된다.
+    // Docker 가 없으면 그 시험만 건너뛴다 — 빌드는 막지 않는다.
+    testImplementation 'org.springframework.boot:spring-boot-testcontainers'
+    testImplementation 'org.testcontainers:testcontainers-junit-jupiter'
+    testImplementation 'org.testcontainers:testcontainers-mysql'
+
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
     // Spring Boot 4 에서 MockMvc 자동설정이 별도 모듈로 분리되었다.
     testImplementation 'org.springframework.boot:spring-boot-webmvc-test'
@@ -35,4 +41,7 @@ dependencies {
 
 tasks.named('test') {
     useJUnitPlatform()
+    // 시간대 버그는 JVM 시간대가 UTC 가 아닐 때만 드러난다(DB 에 9시간 밀려 저장된 적이 있다).
+    // CI 는 보통 UTC 라서, 어느 기계에서 돌려도 잡히게 시험은 한국 시간대로 돌린다.
+    jvmArgs '-Duser.timezone=Asia/Seoul'
 }
