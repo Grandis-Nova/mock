@@ -48,8 +48,11 @@ import tools.jackson.databind.json.JsonMapper;
  *
  * <p>H2 라 동시성은 여기서 보지 않는다. 같은 키 동시 요청은 {@link RegistrationConcurrencyTest} 가
  * 진짜 MySQL 로 본다. 여기서는 순서대로 부를 때의 판정이 명세와 같은지만 본다.
+ *
+ * <p>응답 유실 시험이 붙잡는 시간을 기다리지 않게 유지 시간을 0 으로 둔다. 이 클래스는
+ * {@code @MockitoBean} 때문에 어차피 전용 컨텍스트라 캐시 비용이 늘지 않는다.
  */
-@SpringBootTest
+@SpringBootTest(properties = "mock.timeout-hold-ms=0")
 @AutoConfigureMockMvc
 class RegistrationApiTest {
 
@@ -294,16 +297,21 @@ class RegistrationApiTest {
     /**
      * 명세 시나리오 "RESPONSE_LOST_AFTER_COMMIT 주입 후 재시도 → 저장된 성공 재생. 등록 1건".
      * 결함은 새로 커밋한 요청에만 걸리고, 재생에는 걸리지 않는다.
+     *
+     * <p><b>여기서는 워커가 결과를 모르는지는 증명하지 않는다.</b> MockMvc 에는 실제 소켓이 없어 연결을
+     * 붙잡다 끝낸 응답이 500 으로 보인다. 워커가 정말 읽기 타임아웃(UNKNOWN)을 겪는지는
+     * {@code ConnectionDropperE2eTest} 가 실제 HTTP 클라이언트로 본다. 이 500 을 고치려 들지 말 것.
      */
     @Test
-    @DisplayName("커밋 후 응답 유실 - 응답은 없지만 등록은 남고, 재시도는 재생된다")
+    @DisplayName("커밋 후 응답 유실 - 등록은 남고, 재시도는 재생된다")
     void responseLostAfterCommitThenReplay() throws Exception {
         String key = newKey();
         when(faultHook.consumeResponseLost(anyString())).thenReturn(true);
 
+        // 연결 끊기로 들어갔다는 것만 본다 — 오류 본문 없이 끝났다
         register(key, BODY)
                 .andExpect(status().isInternalServerError())
-                .andExpect(content().string(""));   // 오류 본문도 없다. 워커는 결과를 모른다
+                .andExpect(content().string(""));
         assertThat(repository.findById(key)).get()
                 .satisfies(saved -> assertThat(saved.isActive()).isTrue());
 
