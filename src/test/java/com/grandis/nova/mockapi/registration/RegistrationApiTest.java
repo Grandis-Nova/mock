@@ -295,6 +295,27 @@ class RegistrationApiTest {
     }
 
     /**
+     * 상한을 넘기면 워커는 똑같이 재시도하지만, 부하 시험 결과에서 "주입한 실패" 와 구분돼야 한다.
+     * 그래서 기본 문장이 아니라 상한 초과라고 적힌 500 이 나가야 한다.
+     */
+    @Test
+    @DisplayName("번호가 계속 겹쳐 재시도 상한을 넘기면 상한 초과라고 적힌 500 이다")
+    void retryExhaustedIsNamed() throws Exception {
+        doReturn("R-19990101-0000000009").when(numbers).next(any());   // 매번 같은 번호
+        register(newKey(), BODY).andExpect(status().isCreated());
+
+        String key = newKey();
+        register(key, BODY)
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.errorCode").value("UPSTREAM_UNAVAILABLE"))
+                .andExpect(jsonPath("$.errorMessage").value(RegistrationService.RETRY_EXHAUSTED));
+
+        // 첫 키 1번 + 둘째 키 상한만큼
+        verify(numbers, times(1 + RegistrationService.MAX_ATTEMPTS)).next(any());
+        assertThat(repository.findById(key)).isEmpty();
+    }
+
+    /**
      * 명세 시나리오 "RESPONSE_LOST_AFTER_COMMIT 주입 후 재시도 → 저장된 성공 재생. 등록 1건".
      * 결함은 새로 커밋한 요청에만 걸리고, 재생에는 걸리지 않는다.
      *
