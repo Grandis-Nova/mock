@@ -238,6 +238,9 @@ curl -X POST localhost:8081/external/faults -H 'Content-Type: application/json' 
 등록을 커밋한 뒤 응답 없이 연결을 끊는다. **지연·실패율로는 이 상황을 만들 수 없다** —
 주입한 실패는 모두 커밋 전이라 등록이 저장되지 않기 때문이다. 한 번 발동하면 자동 해제된다.
 
+**결함은 새로 커밋되는 등록에만 걸린다.** 이미 등록된 키에 걸면 재생 요청에는 커밋이 없어 발동하지
+않고 그대로 남는다. 남은 결함은 `POST /external/reset` 이 지운다.
+
 ### 구조
 
 ```
@@ -266,6 +269,20 @@ com.grandis.nova.mockapi/
 같은 새 키로 등록과 취소가 동시에 들어오면 한쪽이 중복 키(1062)를 받는다. **오류가 아니라
 정상 분기다** — 다시 잠금 읽기로 조회해 이어간다. 이 설계는 READ COMMITTED 전제이므로
 `application.yml` 과 `compose.yaml` 양쪽에서 격리 수준을 지정한다.
+
+### 등록 파트 ↔ 제어 파트 계약
+
+등록 처리(`registration/`)가 제어 파트(`global/chaos/`)에서 가져다 쓰는 것은 이 넷뿐이다.
+**시그니처나 아래 약속을 바꾸려면 양쪽이 합의한다.**
+
+| 쓰는 것 | 언제 | 약속 |
+| --- | --- | --- |
+| `ConfigProvider.snapshot()` | 1단계 전 | 이 시도가 끝까지 쓸 설정을 얼려 준다. 버전은 `X-Mock-Config-Version` 으로 나간다 |
+| `FailureInjector.apply(snapshot)` | 1~2단계 | **트랜잭션 밖**에서 부른다. 실패는 `MockException`, `TIMEOUT` 은 응답 없이 끝난다 |
+| `FaultHook.consumeResponseLost(key)` | 7단계 | **새로 커밋한 직후에만** 부른다. true 면 결함을 소비한 것이다 |
+| `ConnectionDropper.drop(reason)` | 7단계 | 응답 없이 연결을 붙잡다 끝낸다. **정상 반환하지 않는다** — 항상 `ResponseLostException` |
+
+`drop()` 이 정상 반환하지 않는다는 것도 계약이다. 등록 처리가 여기에 기대어 뒤이은 201 응답을 쓰지 않는다.
 
 ### 스키마
 
