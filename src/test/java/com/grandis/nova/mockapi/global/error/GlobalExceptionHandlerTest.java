@@ -29,7 +29,10 @@ import org.springframework.web.bind.annotation.RestController;
  * 몇 번을 다시 보내도 결과가 같으므로 4xx 로 나가야 재시도가 멈춘다. 실제 API 컨트롤러는 아직 없어서
  * 여기서만 쓰는 시험용 컨트롤러로 각 예외를 일으킨다.
  */
-@WebMvcTest
+// 범위를 시험용 컨트롤러로 좁힌다. 범위 없는 @WebMvcTest 는 컨트롤러를 전부 긁어오므로,
+// 누군가 새 컨트롤러를 만들 때마다 그 컨트롤러가 의존하는 빈이 없다며 이 시험이 깨진다.
+@WebMvcTest(controllers = {GlobalExceptionHandlerTest.ProbeController.class,
+        GlobalExceptionHandlerTest.PlainProbeController.class})
 @Import({GlobalExceptionHandlerTest.ProbeController.class,
         GlobalExceptionHandlerTest.PlainProbeController.class})
 class GlobalExceptionHandlerTest {
