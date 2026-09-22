@@ -1,6 +1,8 @@
 package com.grandis.nova.mockapi.global.chaos;
 
 import com.grandis.nova.mockapi.global.config.MockProperties;
+import com.grandis.nova.mockapi.global.error.ErrorCode;
+import com.grandis.nova.mockapi.global.error.MockException;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import org.slf4j.Logger;
@@ -29,7 +31,7 @@ import org.springframework.web.context.request.ServletRequestAttributes;
  * 클라이언트가 끊어 줄 때까지 연결이 회수되지 않아 부하 시험에서 쌓인다. 1,000 RPS 에 유지 10초면
  * 약 1만 개로 톰캣 상한(8,192)을 넘는다.
  *
- * <p>유지 시간은 <b>워커 읽기 타임아웃보다 길어야 한다.</b> 짧으면 워커가 타임아웃 대신 200 을
+ * <p>유지 시간은 <b>워커 읽기 타임아웃보다 길어야 한다.</b> 짧으면 워커가 타임아웃 대신 응답을
  * 받아버려 재현하려던 상황이 아니게 된다. 명세가 "워커 타임아웃 + 2초" 로 정한 이유다.
  *
  * <p>붙잡는 동안 스레드 하나가 잔다. 가상 스레드라 수천 개가 동시에 자도 부담이 적다.
@@ -41,6 +43,9 @@ public class ConnectionDropper {
 
     /** 실제로 보낼 일이 없는 길이. 클라이언트는 이만큼을 기다리다 포기한다. */
     private static final int PROMISED_BODY_LENGTH = 1024;
+
+    /** 내용이 0 으로 고정이라 한 번만 만든다. 부하 시험에서 건마다 새로 만들지 않는다. */
+    private static final byte[] FILLER = new byte[PROMISED_BODY_LENGTH];
 
     private final MockProperties properties;
 
@@ -60,7 +65,9 @@ public class ConnectionDropper {
     public void drop(String reason) {
         HttpServletResponse response = currentResponse();
         try {
-            response.setStatus(HttpServletResponse.SC_OK);
+            // 상태는 500 이다. 유지 시간이 워커 읽기 타임아웃보다 짧아 워커가 끝까지 읽어버리면
+            // 200 은 "성공" 으로 읽히지만 500 은 "일시 실패" 라 재시도로 정리된다.
+            response.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
             response.setContentLength(PROMISED_BODY_LENGTH);
             response.flushBuffer();
 
@@ -68,10 +75,17 @@ public class ConnectionDropper {
 
             // 약속한 길이를 채워 응답을 끝낸다. 클라이언트는 이미 포기했으므로 받지 않는다.
             // 이 쓰기가 있어야 연결이 회수된다.
-            response.getOutputStream().write(new byte[PROMISED_BODY_LENGTH]);
+            response.getOutputStream().write(FILLER);
             response.flushBuffer();
         } catch (IOException e) {
-            // 클라이언트가 먼저 끊었다는 뜻이다. 목적은 이미 달성됐다.
+            if (!response.isCommitted()) {
+                // 헤더조차 못 나갔다. 여기서 ResponseLostException 을 던지면 Advice 가 아무것도
+                // 쓰지 않아 200 빈 응답이 나가고, 워커는 그것을 성공으로 읽는다. 등록되지 않은
+                // 예약이 확정되는 최악의 경우라 일시 실패로 바꾼다.
+                log.warn("연결 끊기 실패 — 헤더 전 오류라 일시 실패로 바꾼다", e);
+                throw new MockException(ErrorCode.UPSTREAM_UNAVAILABLE);
+            }
+            // 이미 헤더가 나간 뒤라면 클라이언트가 먼저 끊었다는 뜻이고, 목적은 달성됐다.
             log.debug("연결 끊기 중 입출력 오류 — 이미 끊긴 연결로 본다", e);
         }
         throw new ResponseLostException(reason);
